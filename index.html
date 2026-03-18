@@ -1,9 +1,167 @@
-<script>
-    // ==========================================
-    // ⚠️ 老師請注意：請將下方網址換成你的 GAS 網頁應用程式部署網址
-    // ==========================================
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>溪北國小 - AI 口說出題系統</title>
+  <link href="https://fonts.googleapis.com/css2?family=Rajdhani:wght@600;700&family=Zen+Maru+Gothic:wght@500;700&display=swap" rel="stylesheet">
+  <script src="https://cdn.jsdelivr.net/npm/canvas-confetti@1.6.0/dist/confetti.browser.min.js"></script>
+  <style>
+    /* === 核心樣式 === */
+    :root { --bg-deep: #0f172a; --card-bg: #1e293b; --text-main: #f1f5f9; --text-sub: #94a3b8; --accent: #3b82f6; --success: #10b981; --fail: #ef4444; }
+    body { background-color: var(--bg-deep); color: var(--text-main); font-family: 'Zen Maru Gothic', sans-serif; margin: 0; height: 100vh; display: flex; flex-direction: column; align-items: center; justify-content: center; overflow: hidden; }
+    
+    /* 登入區 */
+    #login-overlay { position: absolute; top: 0; left: 0; width: 100%; height: 100%; background: rgba(15, 23, 42, 0.98); z-index: 100; display: flex; flex-direction: column; justify-content: center; align-items: center; }
+    .login-card { background: var(--card-bg); padding: 40px; border-radius: 24px; text-align: center; border: 1px solid #334155; width: 85%; max-width: 320px; box-shadow: 0 0 50px rgba(59, 130, 246, 0.2); }
+    .login-input { width: 100%; padding: 14px; background: #0f172a; color: white; border: 2px solid #334155; border-radius: 12px; margin-bottom: 20px; font-size: 1.1rem; text-align: center; outline: none; font-family: inherit; box-sizing: border-box;}
+    .start-btn { width: 100%; padding: 14px; background: linear-gradient(135deg, #3b82f6, #2563eb); color: white; border: none; border-radius: 12px; font-size: 1.1rem; font-weight: bold; cursor: pointer; transition: transform 0.1s; }
+    .start-btn:active { transform: scale(0.95); }
+
+    /* 主容器 */
+    .container { width: 95%; max-width: 600px; height: 95vh; display: flex; flex-direction: column; justify-content: space-between; align-items: center; }
+    
+    /* 頭部資訊：包含語音選擇 */
+    .header-panel { width: 100%; display: flex; justify-content: space-between; align-items: center; padding: 10px 15px; background: rgba(30, 41, 59, 0.8); border-radius: 16px; border: 1px solid #334155; box-sizing: border-box; min-height: 70px; backdrop-filter: blur(10px); gap: 10px; }
+    .header-info { display: flex; flex-direction: column; align-items: flex-start; flex: 1; overflow: hidden; }
+    .header-label { font-size: 0.75rem; color: var(--text-sub); text-transform: uppercase; letter-spacing: 1px; }
+    .header-value { font-size: 1rem; font-weight: bold; color: var(--accent); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%; }
+    
+    /* 語音選擇器 */
+    .voice-select-container { flex: 1; max-width: 120px; }
+    #voice-select { width: 100%; background: #0f172a; color: white; border: 1px solid #334155; padding: 5px; border-radius: 8px; font-size: 0.8rem; outline: none; }
+
+    .progress-pill { background: #0f172a; padding: 5px 12px; border-radius: 20px; font-family: 'Rajdhani', sans-serif; font-size: 1.1rem; font-weight: bold; border: 1px solid #334155; white-space: nowrap; }
+
+    /* 進度條 (限時模式) */
+    #timer-wrapper { width: 100%; height: 6px; background: #334155; border-radius: 3px; margin-top: 15px; display: none; overflow: hidden; position: relative; }
+    #timer-bar { width: 100%; height: 100%; background: linear-gradient(90deg, #10b981, #facc15, #ef4444); transition: width 0.1s linear; }
+
+    /* 題目卡片 */
+    .main-card { flex: 1; width: 100%; display: flex; flex-direction: column; justify-content: center; align-items: center; position: relative; margin: 10px 0; }
+    
+    .sentence-container { display: block; text-align: center; font-size: clamp(1.4rem, 5vw, 2.5rem); font-weight: 700; line-height: 1.4; margin-bottom: 25px; padding: 0 10px; transition: all 0.3s; font-family: 'Rajdhani', sans-serif; cursor: default; }
+    
+    /* 盲測特效 */
+    .sentence-container.blind { filter: blur(8px); opacity: 0.5; user-select: none; }
+    .sentence-container.blind.revealed { filter: none; opacity: 1; }
+
+    .word-span { display: inline-block; padding: 2px 6px; border-radius: 8px; transition: all 0.2s; margin: 2px; border: 2px solid transparent; }
+    .word-span.clickable { cursor: pointer; border-bottom: 2px dotted #334155; }
+    .word-span.clickable:hover { background: rgba(255,255,255,0.1); border-color: var(--accent); }
+    
+    .word-span.active-word { background-color: #facc15 !important; color: #000 !important; transform: scale(1.15); box-shadow: 0 0 20px rgba(250, 204, 21, 0.6); z-index: 10; position: relative; border-color: white; }
+    .word-span.correct { color: var(--success); text-shadow: 0 0 10px rgba(16, 185, 129, 0.4); }
+    .word-span.wrong { color: var(--fail); text-decoration: line-through; opacity: 0.6; }
+
+    .translation { font-size: clamp(1rem, 3.5vw, 1.3rem); color: var(--text-sub); text-align: center; min-height: 1.5em; font-weight: 500; }
+    .feedback-box { min-height: 30px; margin-top: 15px; font-size: 0.95rem; color: #94a3b8; font-style: italic; }
+
+    .score-circle { width: 110px; height: 110px; border-radius: 50%; border: 6px solid #334155; display: flex; justify-content: center; align-items: center; font-size: 2.5rem; font-weight: bold; position: absolute; top: -20px; background: var(--bg-deep); z-index: 20; opacity: 0; transform: scale(0.5); transition: all 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275); font-family: 'Rajdhani', sans-serif; }
+    .score-circle.show { opacity: 1; transform: scale(1); box-shadow: 0 10px 30px rgba(0,0,0,0.5); }
+    .score-high { border-color: var(--success); color: var(--success); }
+    .score-mid { border-color: #facc15; color: #facc15; }
+    .score-low { border-color: var(--fail); color: var(--fail); }
+
+    /* 控制區 */
+    .controls { width: 100%; display: flex; flex-direction: column; gap: 15px; margin-bottom: 20px; }
+    
+    .audio-controls { display: flex; align-items: center; justify-content: center; gap: 15px; background: rgba(30, 41, 59, 0.6); padding: 10px; border-radius: 16px; border: 1px solid #334155; }
+    
+    .icon-btn { background: #334155; border: none; color: var(--text-main); width: 42px; height: 42px; border-radius: 50%; font-size: 1.2rem; cursor: pointer; display: flex; align-items: center; justify-content: center; transition: all 0.2s; flex-shrink: 0; }
+    .icon-btn:active { transform: scale(0.9); background: #475569; }
+    
+    .speed-control { display: flex; align-items: center; gap: 8px; flex: 1; max-width: 200px; }
+    input[type=range] { -webkit-appearance: none; width: 100%; height: 6px; background: #475569; border-radius: 3px; outline: none; }
+    input[type=range]::-webkit-slider-thumb { -webkit-appearance: none; appearance: none; width: 18px; height: 18px; border-radius: 50%; background: var(--accent); cursor: pointer; transition: transform 0.1s; }
+    input[type=range]::-webkit-slider-thumb:hover { transform: scale(1.2); }
+    .speed-label { font-size: 0.8rem; color: var(--text-sub); width: 35px; text-align: center; font-family: 'Rajdhani', sans-serif; }
+
+    .hidden { display: none !important; }
+
+    #mic-btn { background: linear-gradient(135deg, #3b82f6 0%, #2563eb 100%); color: white; border: none; padding: 18px; font-size: 1.3rem; border-radius: 16px; cursor: pointer; width: 100%; font-weight: bold; letter-spacing: 1px; box-shadow: 0 4px 15px rgba(59, 130, 246, 0.3); font-family: 'Rajdhani', sans-serif; display: flex; align-items: center; justify-content: center; gap: 10px; }
+    #mic-btn.listening { background: linear-gradient(135deg, #ef4444 0%, #dc2626 100%); animation: pulse 1.5s infinite; }
+    @keyframes pulse { 0% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.4); } 70% { box-shadow: 0 0 0 15px rgba(239, 68, 68, 0); } 100% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0); } }
+
+    .nav-buttons { display: flex; gap: 10px; display: none; }
+    .nav-btn { flex: 1; padding: 15px; border-radius: 12px; border: none; font-size: 1rem; font-weight: bold; cursor: pointer; color: white; display: flex; align-items: center; justify-content: center; gap: 5px; }
+    .btn-retry { background: #475569; }
+    .btn-next { background: #10b981; }
+
+    .mode-badge { position: absolute; top: 15px; left: 50%; transform: translateX(-50%); background: #0f172a; padding: 6px 16px; border-radius: 30px; font-size: 0.85rem; z-index: 50; border: 1px solid #334155; font-weight: bold; box-shadow: 0 4px 10px rgba(0,0,0,0.3); white-space: nowrap; }
+  </style>
+</head>
+<body>
+  <div class="mode-badge" id="mode-badge">系統連線中...</div>
+
+  <div id="login-overlay">
+    <div class="login-card">
+      <div style="font-size:3rem; margin-bottom:10px;">🧬</div>
+      <h2 style="margin:0 0 20px 0; color:white;">學生登入</h2>
+      <input type="text" id="student-name" class="login-input" placeholder="請輸入姓名 / 座號">
+      <button class="start-btn" onclick="startGame()" id="start-btn" disabled>正在與雲端連線... 🚀</button>
+    </div>
+  </div>
+
+  <div class="container">
+    <div class="header-panel">
+      <div class="header-info">
+        <div class="header-label">UNIT</div>
+        <div id="current-sheet-display" class="header-value">...</div>
+      </div>
+      
+      <div class="voice-select-container">
+         <select id="voice-select" onchange="updateVoice()"><option>Loading...</option></select>
+      </div>
+
+      <div class="progress-pill">
+        <span id="current-index">0</span>/<span id="total-count">0</span>
+      </div>
+    </div>
+    
+    <div id="timer-wrapper"><div id="timer-bar"></div></div>
+
+    <div class="main-card">
+      <div id="score-display" class="score-circle">100</div>
+      <div id="sentence-area" class="sentence-container"></div>
+      <div id="translation-area" class="translation">...</div>
+      <div id="feedback-area" class="feedback-box"></div>
+    </div>
+
+    <div class="controls" id="controls-area">
+      
+      <div class="audio-controls" id="audio-panel">
+        <button id="btn-speak" class="icon-btn" onclick="playWholeSentence()">🔊</button>
+        
+        <div class="speed-control" id="speed-slider-area">
+            <span style="font-size:0.8rem">🐢</span>
+            <input type="range" id="rate-slider" min="0.5" max="1.5" step="0.1" value="1" oninput="updateRateLabel()">
+            <span id="rate-label" class="speed-label">1.0x</span>
+        </div>
+
+        <button id="btn-hint" class="icon-btn" onclick="showFirstLetterHint()" style="display:none">💡</button>
+      </div>
+
+      <button id="mic-btn" onclick="toggleSpeech()">
+        <span>🎙️ START SPEAKING</span>
+      </button>
+
+      <div class="nav-buttons" id="practice-actions">
+        <button class="nav-btn btn-retry" onclick="resetCurrentQuestion()">🔄 重試</button>
+        <button class="nav-btn btn-next" onclick="nextQuestion()">下一題 ➡️</button>
+      </div>
+    </div>
+  </div>
+
+  <audio id="sfx-success" src="https://actions.google.com/sounds/v1/cartoon/magic_chime.ogg"></audio>
+  <audio id="sfx-fail" src="https://actions.google.com/sounds/v1/cartoon/cartoon_boing.ogg"></audio>
+
+  <script>
+    // 👇 👇 👇 👇 👇 👇 👇 👇 👇 👇 👇 👇 👇 👇 👇 👇 👇 👇 👇 👇 👇 👇 👇 👇 👇
+    // ⚠️ 老師請注意：請將下方引號內的文字，替換成你部署好的 GAS 網址！
+    // 👆 👆 👆 👆 👆 👆 👆 👆 👆 👆 👆 👆 👆 👆 👆 👆 👆 👆 👆 👆 👆 👆 👆 👆 👆
     const GAS_API_URL = "https://script.google.com/macros/s/AKfycbyEq9nvNpkxhkNimWlPiKfmFQJJmzpdFJyUJwbYbRdt3YJw69cPzpLtFGMglDAvF7VU/exec"; 
-    // 例如："https://script.google.com/macros/s/AKfycb.../exec"
+
 
     const urlParams = new URLSearchParams(window.location.search);
     const TARGET_SHEET = urlParams.get('sheet') || "";
@@ -307,3 +465,5 @@
       .catch(err => alert("成績傳送發生錯誤：" + err));
     }
   </script>
+</body>
+</html>
