@@ -156,7 +156,7 @@
   <audio id="sfx-success" src="https://actions.google.com/sounds/v1/cartoon/magic_chime.ogg"></audio>
   <audio id="sfx-fail" src="https://actions.google.com/sounds/v1/cartoon/cartoon_boing.ogg"></audio>
 
- <script>
+  <script>
     // 👇 👇 👇 👇 👇 👇 👇 👇 👇 👇 👇 👇 👇 👇 👇 👇 👇 👇 👇 👇 👇 👇 👇 👇 👇
     // ⚠️ 老師請注意：請將下方引號內的文字，替換成你部署好的 GAS 網址！
     // 👆 👆 👆 👆 👆 👆 👆 👆 👆 👆 👆 👆 👆 👆 👆 👆 👆 👆 👆 👆 👆 👆 👆 👆 👆
@@ -168,10 +168,13 @@
     const QUESTION_COUNT = urlParams.get('n') || "all";
     const IS_RANDOM = urlParams.get('r') || "false";
 
-    let quizData=[], currentIndex=0, recognition, isListening=false, voices=[], studentName="", questionMaxScores=[], currentSheetName="", appMode="PRACTICE";
+    let quizData=[], currentIndex=0, isListening=false, voices=[], studentName="", questionMaxScores=[], currentSheetName="", appMode="PRACTICE";
     let timerInterval, timeLeft=10, TOTAL_TIME=10;
     let selectedVoice = null;
-    let fallbackTimer = null; // ✨ 新增：用來對付 Safari 裝死的計時器
+    
+    // ✨ 抗 iOS 當機專屬變數
+    let recognition = null;
+    let fallbackTimer = null; 
 
     window.onload = function() {
       window.speechSynthesis.onvoiceschanged = initVoices;
@@ -354,64 +357,84 @@
       window.speechSynthesis.speak(u);
     }
 
-    // ✨ 終極修正：加入 8 秒強制防卡死機制
-    function toggleSpeech() {
-      if (isListening && recognition) {
-        recognition.stop();
-        return;
-      }
-
+    // ✨ 核心修正 1：回歸 Singleton，避免記憶體爆炸
+    function initSpeechRecognition() {
       const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
       if (!SpeechRecognition) {
           alert("你的瀏覽器不支援語音辨識！\n\n🍎 蘋果裝置 (iPad/iPhone)：請務必使用「Safari」開啟。\n💻 電腦與安卓裝置：請使用「Chrome」開啟。");
-          return;
+          return false;
       }
 
-      recognition = new SpeechRecognition(); 
-      recognition.lang = 'en-US'; 
-      recognition.interimResults = false;
+      // 確保全場只建立一次麥克風物件
+      if (!recognition) {
+        recognition = new SpeechRecognition(); 
+        recognition.lang = 'en-US'; 
+        recognition.interimResults = false;
+        recognition.continuous = false; // Safari 很依賴這項設定
 
-      // 每次啟動前先清除舊的計時器
-      clearTimeout(fallbackTimer);
-
-      recognition.onstart = () => { 
-        isListening = true; 
-        document.getElementById('mic-btn').classList.add('listening'); 
+        recognition.onstart = () => { 
+          isListening = true; 
+          document.getElementById('mic-btn').classList.add('listening'); 
+          
+          // 防卡死計時器：Safari 裝死不給結果時強制踢掉
+          clearTimeout(fallbackTimer);
+          fallbackTimer = setTimeout(() => {
+              if (isListening) {
+                  console.log("Safari 逾時無回應，觸發強制重置");
+                  try { recognition.stop(); } catch(e){}
+                  isListening = false;
+                  document.getElementById('mic-btn').classList.remove('listening');
+                  document.getElementById('feedback-area').innerHTML = "<span style='color:#facc15'>⚠️ 沒聽清楚，請再按一次重試！</span>";
+              }
+          }, 8000); 
+        };
         
-        // ✨ 開始倒數 8 秒，如果 Safari 裝死不給結果，強制把按鈕彈回來
-        fallbackTimer = setTimeout(() => {
-            if (isListening) {
-                console.log("Safari 逾時無回應，觸發強制重置");
-                try { recognition.stop(); } catch(e){}
-                isListening = false;
-                document.getElementById('mic-btn').classList.remove('listening');
-                document.getElementById('feedback-area').innerHTML = "<span style='color:#facc15'>⚠️ 沒聽清楚，請再點一次麥克風重試！</span>";
-            }
-        }, 8000); 
-      };
-      
-      recognition.onerror = (e) => {
-        console.log("語音辨識中斷: " + e.error);
-        isListening = false; 
-        document.getElementById('mic-btn').classList.remove('listening');
-        clearTimeout(fallbackTimer); // 正常報錯就取消計時器
-      };
+        recognition.onerror = (e) => {
+          console.log("語音辨識中斷: " + e.error);
+          isListening = false; 
+          document.getElementById('mic-btn').classList.remove('listening');
+          clearTimeout(fallbackTimer); 
+        };
 
-      recognition.onend = () => { 
-        isListening = false; 
-        document.getElementById('mic-btn').classList.remove('listening'); 
-        clearTimeout(fallbackTimer); // 正常結束就取消計時器
-      };
+        recognition.onend = () => { 
+          isListening = false; 
+          document.getElementById('mic-btn').classList.remove('listening'); 
+          clearTimeout(fallbackTimer); 
+        };
 
-      recognition.onresult = (e) => {
-        clearTimeout(fallbackTimer); // 成功拿到結果就取消計時器
-        calculateScore(e.results[0][0].transcript);
-      };
+        recognition.onresult = (e) => {
+          clearTimeout(fallbackTimer); 
+          isListening = false;
+          document.getElementById('mic-btn').classList.remove('listening'); 
+          calculateScore(e.results[0][0].transcript);
+        };
+      }
+      return true;
+    }
+
+    // ✨ 核心修正 2：強制搶奪音訊權與假死電擊器
+    function toggleSpeech() {
+      if (!initSpeechRecognition()) return;
+
+      if (isListening) {
+        try { recognition.stop(); } catch(e) {}
+        return;
+      }
+
+      // 🍎 蘋果專屬解藥：在開啟麥克風之前，強制清空所有 TTS 發音和音效！避免音訊通道被佔用導致麥克風錄不到聲音。
+      window.speechSynthesis.cancel(); 
+      try { document.getElementById('sfx-success').pause(); document.getElementById('sfx-success').currentTime = 0; } catch(e){}
+      try { document.getElementById('sfx-fail').pause(); document.getElementById('sfx-fail').currentTime = 0; } catch(e){}
 
       try {
         recognition.start();
       } catch(err) {
-        console.log("語音啟動失敗:", err);
+        // 假死電擊器：如果 Safari 發生 InvalidStateError，強制停止後延遲重啟
+        console.log("麥克風狀態異常，嘗試強制重置:", err);
+        try { recognition.stop(); } catch(e) {}
+        setTimeout(() => {
+          try { recognition.start(); } catch(e) { console.log("重啟失敗", e); }
+        }, 300);
       }
     }
 
@@ -487,3 +510,5 @@
       .catch(err => alert("成績傳送發生錯誤：" + err));
     }
   </script>
+</body>
+</html>
